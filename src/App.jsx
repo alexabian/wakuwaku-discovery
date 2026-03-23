@@ -59,19 +59,72 @@ function freshProgress() {
     w2: { m1: null, m2: null, m3: null, m4: null },
     w3: { m1: null, m2: null, m3: null },
     w4: { m1: null, m2: null, m3: null },
+    streak: 0,
+    lastPlayed: null,
   }
 }
 
 function loadProgress() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
-    if (raw) return JSON.parse(raw)
+    if (raw) {
+      const p = JSON.parse(raw)
+      if (!('streak' in p)) p.streak = 0
+      if (!('lastPlayed' in p)) p.lastPlayed = null
+      return p
+    }
   } catch (_) {}
   return freshProgress()
 }
 
 function saveProgress(p) {
   try { localStorage.setItem(STORAGE_KEY, JSON.stringify(p)) } catch (_) {}
+}
+
+// ─── Streak helpers ───────────────────────────────────────────────────────────
+
+function getTodayStr() {
+  return new Date().toISOString().slice(0, 10)
+}
+
+function stampStreak(p) {
+  const today = getTodayStr()
+  if (p.lastPlayed === today) return p
+  const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10)
+  const newStreak = p.lastPlayed === yesterday ? (p.streak || 0) + 1 : 1
+  return { ...p, streak: newStreak, lastPlayed: today }
+}
+
+// ─── Explorer rank ────────────────────────────────────────────────────────────
+
+const RANKS = [
+  { min: 36, jp: 'でんせつのたんけんか', en: 'Legendary Explorer', emoji: '🌟' },
+  { min: 25, jp: 'マスタータンけんか',   en: 'Master Explorer',    emoji: '🏆' },
+  { min: 14, jp: 'じゅくれんたんけんか', en: 'Senior Explorer',    emoji: '🔭' },
+  { min: 5,  jp: 'たんけんか',           en: 'Explorer',           emoji: '🧭' },
+  { min: 0,  jp: 'みならいたんけんか',   en: 'Apprentice Explorer', emoji: '🗺️' },
+]
+
+function getExplorerRank(totalStars) {
+  return RANKS.find(r => totalStars >= r.min) ?? RANKS[RANKS.length - 1]
+}
+
+function totalStarsAllWorlds(progress) {
+  return WORLDS.reduce((sum, world) =>
+    sum + world.modules.reduce((s, mod) => {
+      const rec = getModuleRecord(progress, world.id, mod.id)
+      return s + (rec ? rec.stars : 0)
+    }, 0)
+  , 0)
+}
+
+// ─── Crown helper ─────────────────────────────────────────────────────────────
+
+function getCrown(stars) {
+  if (stars === 3) return '🥇'
+  if (stars === 2) return '🥈'
+  if (stars === 1) return '🥉'
+  return null
 }
 
 function getStars(wrongCount) {
@@ -170,7 +223,9 @@ function ParentPanel({ progress, onRestore, onReset, onClose }) {
   function handleImport() {
     try {
       const parsed = JSON.parse(atob(importVal.trim()))
-      if (typeof parsed !== 'object' || parsed === null || !('w1' in parsed) || !('w2' in parsed) || !('w3' in parsed) || !('w4' in parsed)) throw new Error('bad')
+      if (typeof parsed !== 'object' || parsed === null || !('w1' in parsed)) throw new Error('bad')
+      if (!('streak' in parsed)) parsed.streak = 0
+      if (!('lastPlayed' in parsed)) parsed.lastPlayed = null
       onRestore(parsed)
       setImportStatus('ok')
       setTimeout(onClose, 800)
@@ -304,10 +359,14 @@ function ParentPanel({ progress, onRestore, onReset, onClose }) {
 // ─── Home screen ──────────────────────────────────────────────────────────────
 
 function HomeScreen({ progress, onSelectWorld, onParent }) {
+  const totalStars = totalStarsAllWorlds(progress)
+  const rank = getExplorerRank(totalStars)
+  const streak = progress.streak || 0
+
   return (
-    <div className="screen" style={{ paddingTop: 28 }}>
+    <div className="screen" style={{ paddingTop: 20 }}>
       <ParchmentBg />
-      <div style={{ position: 'relative', zIndex: 1, width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 24 }}>
+      <div style={{ position: 'relative', zIndex: 1, width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 18 }}>
 
         <div style={{ width: '100%', display: 'flex', justifyContent: 'flex-end' }}>
           <button
@@ -323,27 +382,63 @@ function HomeScreen({ progress, onSelectWorld, onParent }) {
         </div>
 
         <div style={{ textAlign: 'center' }}>
-          <div style={{ fontSize: 52, lineHeight: 1, marginBottom: 6 }}>🦉</div>
-          <div style={{ fontFamily: 'var(--font-rounded)', fontSize: 28, fontWeight: 800, color: 'var(--brown)', letterSpacing: '0.02em' }}>
+          <div style={{ fontSize: 48, lineHeight: 1, marginBottom: 4 }}>🦉</div>
+          <div style={{ fontFamily: 'var(--font-rounded)', fontSize: 26, fontWeight: 800, color: 'var(--brown)', letterSpacing: '0.02em' }}>
             わくわく
           </div>
-          <div style={{ fontFamily: 'var(--font-en)', fontSize: 26, fontWeight: 900, color: 'var(--amber)', letterSpacing: '0.04em' }}>
+          <div style={{ fontFamily: 'var(--font-en)', fontSize: 24, fontWeight: 900, color: 'var(--amber)', letterSpacing: '0.04em' }}>
             Discovery
           </div>
         </div>
 
+        {/* ── Rank + Streak bar ── */}
         <div style={{
-          display: 'grid',
-          gridTemplateColumns: '1fr 1fr',
-          gap: 14,
+          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10,
           width: '100%',
         }}>
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 6,
+            background: 'white', border: '2px solid var(--sand)',
+            borderRadius: 50, padding: '6px 14px',
+            boxShadow: '0 2px 0 var(--sand)',
+          }}>
+            <span style={{ fontSize: 18 }}>{rank.emoji}</span>
+            <div>
+              <div style={{ fontFamily: 'var(--font-jp)', fontSize: 12, fontWeight: 700, color: 'var(--brown)', lineHeight: 1.2 }}>
+                {rank.jp}
+              </div>
+              <div style={{ fontFamily: 'var(--font-en)', fontSize: 10, color: 'var(--brown-mid)', opacity: 0.7, lineHeight: 1 }}>
+                {rank.en}
+              </div>
+            </div>
+          </div>
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 5,
+            background: streak > 0 ? '#FFF3E0' : 'white',
+            border: `2px solid ${streak > 0 ? 'var(--amber)' : 'var(--sand)'}`,
+            borderRadius: 50, padding: '6px 14px',
+            boxShadow: '0 2px 0 var(--sand)',
+          }}>
+            <span style={{ fontSize: 18 }}>🔥</span>
+            <div>
+              <div style={{ fontFamily: 'var(--font-en)', fontSize: 16, fontWeight: 900, color: streak > 0 ? 'var(--amber)' : 'var(--sand)', lineHeight: 1 }}>
+                {streak}
+              </div>
+              <div style={{ fontFamily: 'var(--font-en)', fontSize: 9, color: 'var(--brown-mid)', opacity: 0.6, lineHeight: 1 }}>
+                day streak
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* ── World cards ── */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, width: '100%' }}>
           {WORLDS.map(world => {
-            const totalStars = world.modules.reduce((sum, mod) => {
+            const crowns = world.modules.map(mod => {
               const rec = getModuleRecord(progress, world.id, mod.id)
-              return sum + (rec ? rec.stars : 0)
-            }, 0)
-            const maxStars = world.modules.length * 3
+              return rec ? getCrown(rec.stars) : null
+            })
+            const goldCount = crowns.filter(c => c === '🥇').length
 
             return (
               <button
@@ -352,19 +447,26 @@ function HomeScreen({ progress, onSelectWorld, onParent }) {
                 style={{ background: world.tint, borderColor: world.locked ? 'var(--sand)' : world.border }}
                 onClick={() => !world.locked && onSelectWorld(world)}
               >
-                <div style={{ fontSize: 44 }}>{world.emoji}</div>
-                <div style={{ fontFamily: 'var(--font-jp)', fontSize: 16, fontWeight: 700, color: 'var(--brown)', textAlign: 'center', lineHeight: 1.4 }}>
+                <div style={{ fontSize: 40 }}>{world.emoji}</div>
+                <div style={{ fontFamily: 'var(--font-jp)', fontSize: 15, fontWeight: 700, color: 'var(--brown)', textAlign: 'center', lineHeight: 1.4 }}>
                   {world.titleJp}
                 </div>
-                <div className="en-label" style={{ fontSize: 11 }}>{world.titleEn}</div>
+                <div className="en-label" style={{ fontSize: 10 }}>{world.titleEn}</div>
 
                 {world.locked ? (
-                  <div style={{ marginTop: 6, fontSize: 13, fontFamily: 'var(--font-jp)', color: 'var(--sand)', fontWeight: 700 }}>
+                  <div style={{ marginTop: 4, fontSize: 12, fontFamily: 'var(--font-jp)', color: 'var(--sand)', fontWeight: 700 }}>
                     🔒 もうすぐ！
                   </div>
                 ) : (
-                  <div style={{ marginTop: 6 }}>
-                    <Stars count={Math.round((totalStars / Math.max(maxStars, 1)) * 3)} size={16} />
+                  <div style={{ marginTop: 6, display: 'flex', gap: 3, alignItems: 'center' }}>
+                    {crowns.map((crown, i) => (
+                      <span key={i} style={{ fontSize: 16, opacity: crown ? 1 : 0.25 }}>
+                        {crown ?? '🥇'}
+                      </span>
+                    ))}
+                    {goldCount === world.modules.length && world.modules.length > 0 && (
+                      <span style={{ fontSize: 14, marginLeft: 2 }}>✨</span>
+                    )}
                   </div>
                 )}
               </button>
@@ -420,8 +522,13 @@ function WorldScreen({ world, progress, onBack, onSelectModule }) {
                   </div>
                   <div className="en-label" style={{ fontSize: 12 }}>{mod.titleEn}</div>
                   {record && (
-                    <div style={{ marginTop: 4 }}>
-                      <Stars count={record.stars} size={16} />
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4 }}>
+                      <span style={{ fontSize: 22 }}>{getCrown(record.stars)}</span>
+                      {record.stars < 3 && (
+                        <span style={{ fontSize: 11, color: 'var(--amber)', fontFamily: 'var(--font-en)', fontWeight: 700 }}>
+                          aim for 🥇
+                        </span>
+                      )}
                     </div>
                   )}
                 </div>
@@ -536,56 +643,109 @@ function QuizScreen({ module, session, qIndex, wrongCount, onAnswer, onBack }) {
 
 // ─── Completion screen ────────────────────────────────────────────────────────
 
-function CompletionScreen({ module, stars, wrongCount, onReplay, onBack }) {
+function CompletionScreen({ module, stars, wrongCount, rankUp, newStreak, onReplay, onBack }) {
+  const crown = getCrown(stars)
   return (
-    <div className="screen slideup-anim" style={{ paddingTop: 28, justifyContent: 'center', minHeight: '100%' }}>
+    <div className="screen slideup-anim" style={{ paddingTop: 24, justifyContent: 'center', minHeight: '100%' }}>
       <ParchmentBg />
-      <div style={{ position: 'relative', zIndex: 1, width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 20 }}>
+      <div style={{ position: 'relative', zIndex: 1, width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16 }}>
 
-        <div className="bounce-anim" style={{ fontSize: 72, lineHeight: 1 }}>🦉</div>
+        <div className="bounce-anim" style={{ fontSize: 68, lineHeight: 1 }}>🦉</div>
 
         <div style={{ textAlign: 'center' }}>
-          <div style={{ fontFamily: 'var(--font-jp)', fontSize: 26, fontWeight: 900, color: 'var(--brown)' }}>
+          <div style={{ fontFamily: 'var(--font-jp)', fontSize: 24, fontWeight: 900, color: 'var(--brown)' }}>
             おわった！
           </div>
-          <div className="en-label" style={{ fontSize: 14, marginTop: 2 }}>
+          <div className="en-label" style={{ fontSize: 13, marginTop: 2 }}>
             {module.titleEn} complete
           </div>
         </div>
 
-        <Stars count={stars} size={52} animate />
+        {/* ── Crown earned ── */}
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
+          <span className="bounce-anim" style={{ fontSize: 64, lineHeight: 1, animationDelay: '0.15s' }}>{crown}</span>
+          <div style={{ fontFamily: 'var(--font-en)', fontSize: 13, fontWeight: 700, color: 'var(--brown-mid)' }}>
+            {stars === 3 ? 'Gold Crown!' : stars === 2 ? 'Silver Crown!' : 'Bronze Crown!'}
+          </div>
+        </div>
 
+        {/* ── Performance card ── */}
         <div style={{
-          background: 'white',
-          border: '2.5px solid var(--sand)',
-          borderRadius: 20,
-          padding: '16px 28px',
-          textAlign: 'center',
-          width: '100%',
+          background: 'white', border: '2.5px solid var(--sand)',
+          borderRadius: 20, padding: '14px 24px', textAlign: 'center', width: '100%',
         }}>
           <div style={{ fontFamily: 'var(--font-jp)', fontSize: 18, fontWeight: 700, color: 'var(--brown)' }}>
             {stars === 3 && 'すごい！ かんぺき！'}
             {stars === 2 && 'よくできました！'}
             {stars === 1 && 'がんばったね！'}
           </div>
-          <div className="en-label" style={{ marginTop: 4 }}>
+          <div className="en-label" style={{ marginTop: 3 }}>
             {stars === 3 && 'Perfect! No mistakes!'}
             {stars === 2 && 'Well done!'}
             {stars === 1 && 'Good effort!'}
           </div>
           {wrongCount > 0 && (
-            <div style={{ marginTop: 10, fontFamily: 'var(--font-en)', fontSize: 13, color: 'var(--brown-mid)' }}>
+            <div style={{ marginTop: 8, fontFamily: 'var(--font-en)', fontSize: 12, color: 'var(--brown-mid)' }}>
               {wrongCount} wrong {wrongCount === 1 ? 'tap' : 'taps'}
+            </div>
+          )}
+          {stars < 3 && (
+            <div style={{
+              marginTop: 10, padding: '8px 12px', borderRadius: 12,
+              background: '#FFF8E1', border: '1.5px solid var(--amber)',
+              fontFamily: 'var(--font-jp)', fontSize: 13, color: 'var(--amber)', fontWeight: 700,
+            }}>
+              🥇 ゴールドに ちょうせん！
+              <div style={{ fontFamily: 'var(--font-en)', fontSize: 11, fontWeight: 600, opacity: 0.8, marginTop: 2 }}>
+                Play again with 0 mistakes for Gold!
+              </div>
             </div>
           )}
         </div>
 
+        {/* ── Rank-up banner ── */}
+        {rankUp && (
+          <div className="rankup-banner" style={{
+            width: '100%', borderRadius: 20, padding: '14px 20px', textAlign: 'center',
+            background: 'linear-gradient(135deg, #FFF8E1, #FFF3CD)',
+            border: '2.5px solid var(--amber)',
+            boxShadow: '0 4px 16px rgba(232,150,62,0.3)',
+          }}>
+            <div style={{ fontSize: 11, fontFamily: 'var(--font-en)', fontWeight: 700, color: 'var(--amber)', letterSpacing: '0.08em', marginBottom: 4 }}>
+              ★ RANK UP ★
+            </div>
+            <div style={{ fontSize: 32 }}>{rankUp.emoji}</div>
+            <div style={{ fontFamily: 'var(--font-jp)', fontSize: 16, fontWeight: 800, color: 'var(--brown)', marginTop: 4 }}>
+              {rankUp.jp}
+            </div>
+            <div className="en-label" style={{ fontSize: 12, marginTop: 2 }}>{rankUp.en}</div>
+          </div>
+        )}
+
+        {/* ── Streak badge ── */}
+        {newStreak && (
+          <div className="streak-pop" style={{
+            display: 'flex', alignItems: 'center', gap: 8,
+            background: '#FFF3E0', border: '2px solid var(--amber)',
+            borderRadius: 50, padding: '8px 18px',
+          }}>
+            <span style={{ fontSize: 22 }}>🔥</span>
+            <div>
+              <span style={{ fontFamily: 'var(--font-en)', fontWeight: 900, fontSize: 18, color: 'var(--amber)' }}>{newStreak}</span>
+              <span style={{ fontFamily: 'var(--font-en)', fontSize: 13, color: 'var(--brown-mid)', marginLeft: 5 }}>
+                {newStreak === 1 ? 'day streak!' : 'days in a row!'}
+              </span>
+            </div>
+          </div>
+        )}
+
+        {/* ── Buttons ── */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10, width: '100%' }}>
           <button
             onClick={onReplay}
             style={{
               background: 'var(--amber)', border: 'none', borderRadius: 18,
-              padding: '16px', fontFamily: 'var(--font-jp)', fontSize: 20, fontWeight: 800,
+              padding: '15px', fontFamily: 'var(--font-jp)', fontSize: 19, fontWeight: 800,
               color: 'white', boxShadow: '0 4px 0 #BF6A1F', width: '100%',
             }}
           >
@@ -594,7 +754,7 @@ function CompletionScreen({ module, stars, wrongCount, onReplay, onBack }) {
           <button
             onClick={onBack}
             className="back-btn"
-            style={{ width: '100%', justifyContent: 'center', fontSize: 17, padding: '14px' }}
+            style={{ width: '100%', justifyContent: 'center', fontSize: 16, padding: '13px' }}
           >
             もどる
           </button>
@@ -617,6 +777,8 @@ export default function App() {
   const [completionStars, setCompletionStars] = useState(0)
   const [progress, setProgress] = useState(loadProgress)
   const [showParent, setShowParent] = useState(false)
+  const [rankUp, setRankUp] = useState(null)
+  const [streakUpdated, setStreakUpdated] = useState(null)
 
   function startModule(world, mod) {
     const s = buildSession(mod.data)
@@ -639,22 +801,23 @@ export default function App() {
       const stars = getStars(wc)
       setCompletionStars(stars)
 
-      setProgress(prev => {
-        const wKey = `w${activeWorld.id}`
-        const mKey = `m${activeModule.id}`
-        const existing = prev[wKey]?.[mKey]
-        const bestWrong = existing ? Math.min(existing.bestWrong, wc) : wc
-        const bestStars = existing ? Math.max(existing.stars, stars) : stars
-        const next = {
-          ...prev,
-          [wKey]: {
-            ...prev[wKey],
-            [mKey]: { stars: bestStars, bestWrong },
-          },
-        }
-        saveProgress(next)
-        return next
-      })
+      const wKey = `w${activeWorld.id}`
+      const mKey = `m${activeModule.id}`
+      const existing = progress[wKey]?.[mKey]
+      const bestWrong = existing ? Math.min(existing.bestWrong, wc) : wc
+      const bestStars = existing ? Math.max(existing.stars, stars) : stars
+      const withStreak = stampStreak(progress)
+      const next = {
+        ...withStreak,
+        [wKey]: { ...progress[wKey], [mKey]: { stars: bestStars, bestWrong } },
+      }
+      saveProgress(next)
+      setProgress(next)
+
+      const prevRank = getExplorerRank(totalStarsAllWorlds(progress))
+      const nextRank = getExplorerRank(totalStarsAllWorlds(next))
+      setRankUp(prevRank.min !== nextRank.min ? nextRank : null)
+      setStreakUpdated(withStreak.streak !== (progress.streak || 0) ? withStreak.streak : null)
 
       setTimeout(() => setScreen('complete'), 400)
     } else {
@@ -663,6 +826,8 @@ export default function App() {
   }
 
   function handleReplay() {
+    setRankUp(null)
+    setStreakUpdated(null)
     startModule(activeWorld, activeModule)
   }
 
@@ -726,8 +891,10 @@ export default function App() {
         module={activeModule}
         stars={completionStars}
         wrongCount={wrongCount}
+        rankUp={rankUp}
+        newStreak={streakUpdated}
         onReplay={handleReplay}
-        onBack={() => setScreen('world')}
+        onBack={() => { setRankUp(null); setStreakUpdated(null); setScreen('world') }}
       />
     )
   }
