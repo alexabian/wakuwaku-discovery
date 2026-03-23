@@ -208,9 +208,79 @@ function AnswerBtn({ choice, state, onClick, disabled }) {
 // ─── Parent panel ─────────────────────────────────────────────────────────────
 
 function ParentPanel({ progress, onRestore, onReset, onClose }) {
-  const [importVal, setImportVal] = useState('')
+  // ── Cloud sync state ──────────────────────────────────────────────────────
+  const [cloudName, setCloudName]   = useState('')
+  const [cloudPin,  setCloudPin]    = useState('')
+  const [cloudStatus, setCloudStatus] = useState(null)
+  // null | 'saving' | 'loading' | 'ok-save' | 'ok-load'
+  // | 'err-pin' | 'err-notfound' | 'err'
+
+  const cloudReady = cloudName.trim().length > 0 && cloudPin.length === 4
+
+  function resetCloudStatus(delay = 3000) {
+    setTimeout(() => setCloudStatus(null), delay)
+  }
+
+  async function handleCloudSave() {
+    if (!cloudReady) return
+    setCloudStatus('saving')
+    try {
+      const r = await fetch('/api/save', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ name: cloudName.trim(), pin: cloudPin, progress }),
+      })
+      const data = await r.json()
+      if (r.status === 403)     { setCloudStatus('err-pin');      resetCloudStatus() }
+      else if (!r.ok)           { setCloudStatus('err');           resetCloudStatus() }
+      else                      { setCloudStatus('ok-save');       resetCloudStatus() }
+    } catch {
+      setCloudStatus('err')
+      resetCloudStatus()
+    }
+  }
+
+  async function handleCloudLoad() {
+    if (!cloudReady) return
+    setCloudStatus('loading')
+    try {
+      const r = await fetch('/api/load', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ name: cloudName.trim(), pin: cloudPin }),
+      })
+      const data = await r.json()
+      if (r.status === 404)     { setCloudStatus('err-notfound'); resetCloudStatus() }
+      else if (r.status === 403){ setCloudStatus('err-pin');      resetCloudStatus() }
+      else if (!r.ok)           { setCloudStatus('err');          resetCloudStatus() }
+      else {
+        const p = data.progress
+        if (!('streak' in p))     p.streak     = 0
+        if (!('lastPlayed' in p)) p.lastPlayed = null
+        onRestore(p)
+        setCloudStatus('ok-load')
+        setTimeout(onClose, 900)
+      }
+    } catch {
+      setCloudStatus('err')
+      resetCloudStatus()
+    }
+  }
+
+  const cloudMsg = {
+    'saving':       { text: 'Saving…',           color: 'var(--amber)' },
+    'loading':      { text: 'Loading…',           color: 'var(--teal)'  },
+    'ok-save':      { text: '✅ Saved!',          color: 'var(--green)' },
+    'ok-load':      { text: '✅ Loaded!',         color: 'var(--green)' },
+    'err-pin':      { text: '❌ Wrong PIN',       color: 'var(--red)'   },
+    'err-notfound': { text: '❌ Profile not found', color: 'var(--red)' },
+    'err':          { text: '❌ Error — try again', color: 'var(--red)' },
+  }[cloudStatus] ?? null
+
+  // ── Token backup state ────────────────────────────────────────────────────
+  const [importVal, setImportVal]     = useState('')
   const [importStatus, setImportStatus] = useState(null)
-  const [copied, setCopied] = useState(false)
+  const [copied, setCopied]           = useState(false)
   const exportCode = btoa(JSON.stringify(progress))
 
   function handleCopy() {
@@ -224,7 +294,7 @@ function ParentPanel({ progress, onRestore, onReset, onClose }) {
     try {
       const parsed = JSON.parse(atob(importVal.trim()))
       if (typeof parsed !== 'object' || parsed === null || !('w1' in parsed)) throw new Error('bad')
-      if (!('streak' in parsed)) parsed.streak = 0
+      if (!('streak' in parsed))     parsed.streak     = 0
       if (!('lastPlayed' in parsed)) parsed.lastPlayed = null
       onRestore(parsed)
       setImportStatus('ok')
@@ -253,6 +323,7 @@ function ParentPanel({ progress, onRestore, onReset, onClose }) {
           border: '3px solid var(--sand)',
           boxShadow: '0 12px 40px rgba(44,36,24,0.2)',
           display: 'flex', flexDirection: 'column', gap: 20,
+          overflowY: 'auto', maxHeight: '90vh',
         }}
       >
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
@@ -274,7 +345,86 @@ function ParentPanel({ progress, onRestore, onReset, onClose }) {
           >✕</button>
         </div>
 
+        {/* ── Cloud Sync ────────────────────────────────────────────────── */}
+        <div style={{
+          background: 'white', borderRadius: 16, padding: 16,
+          border: '2px solid var(--teal)', display: 'flex', flexDirection: 'column', gap: 10,
+        }}>
+          <div style={{ fontFamily: 'var(--font-en)', fontWeight: 800, fontSize: 14, color: 'var(--teal)' }}>
+            ☁️ Cloud Save / Load
+          </div>
+          <div style={{ fontSize: 12, color: 'var(--brown-mid)', opacity: 0.8 }}>
+            Pick a name + 4-digit PIN to sync across devices.
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <input
+              value={cloudName}
+              onChange={e => setCloudName(e.target.value)}
+              placeholder="Name (e.g. Lidia)"
+              maxLength={30}
+              style={{
+                flex: 1, padding: '9px 12px', borderRadius: 10,
+                border: '2px solid var(--sand)', background: 'var(--bg-alt)',
+                fontFamily: 'var(--font-en)', fontSize: 13, color: 'var(--brown)',
+              }}
+            />
+            <input
+              value={cloudPin}
+              onChange={e => setCloudPin(e.target.value.replace(/\D/g, '').slice(0, 4))}
+              placeholder="PIN"
+              type="password"
+              inputMode="numeric"
+              maxLength={4}
+              style={{
+                width: 70, padding: '9px 12px', borderRadius: 10,
+                border: '2px solid var(--sand)', background: 'var(--bg-alt)',
+                fontFamily: 'var(--font-en)', fontSize: 13, color: 'var(--brown)',
+                textAlign: 'center',
+              }}
+            />
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button
+              onClick={handleCloudSave}
+              disabled={!cloudReady || cloudStatus === 'saving' || cloudStatus === 'loading'}
+              style={{
+                flex: 1, padding: '9px 12px', borderRadius: 10,
+                background: 'var(--teal)', border: 'none',
+                color: 'white', fontFamily: 'var(--font-en)', fontWeight: 700, fontSize: 13,
+                cursor: cloudReady ? 'pointer' : 'default',
+                opacity: cloudReady ? 1 : 0.45, transition: 'opacity 0.2s',
+              }}
+            >
+              ⬆ Save
+            </button>
+            <button
+              onClick={handleCloudLoad}
+              disabled={!cloudReady || cloudStatus === 'saving' || cloudStatus === 'loading'}
+              style={{
+                flex: 1, padding: '9px 12px', borderRadius: 10,
+                background: 'var(--amber)', border: 'none',
+                color: 'white', fontFamily: 'var(--font-en)', fontWeight: 700, fontSize: 13,
+                cursor: cloudReady ? 'pointer' : 'default',
+                opacity: cloudReady ? 1 : 0.45, transition: 'opacity 0.2s',
+              }}
+            >
+              ⬇ Load
+            </button>
+          </div>
+          {cloudMsg && (
+            <div style={{ fontFamily: 'var(--font-en)', fontSize: 13, fontWeight: 700, color: cloudMsg.color, textAlign: 'center' }}>
+              {cloudMsg.text}
+            </div>
+          )}
+        </div>
+
+        {/* ── Divider ───────────────────────────────────────────────────── */}
+        <div style={{ borderTop: '2px solid var(--bg-alt)' }} />
+
         <div>
+          <div style={{ fontSize: 12, color: 'var(--brown-mid)', marginBottom: 6, opacity: 0.6, fontFamily: 'var(--font-en)', fontWeight: 700 }}>
+            Backup code (manual)
+          </div>
           <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--brown)', marginBottom: 8, fontFamily: 'var(--font-en)' }}>
             Save code (copy this)
           </div>
