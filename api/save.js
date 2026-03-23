@@ -1,5 +1,10 @@
-import { kv } from '@vercel/kv'
+import { Redis } from '@upstash/redis'
 import { createHash } from 'crypto'
+
+const kv = new Redis({
+  url:   process.env.UPSTASH_REDIS_REST_URL,
+  token: process.env.UPSTASH_REDIS_REST_TOKEN,
+})
 
 const normalise = s => s.toLowerCase().trim().replace(/\s+/g, '')
 const hashPin   = (name, pin) =>
