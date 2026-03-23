@@ -1,5 +1,8 @@
 import { useState, useCallback } from 'react'
 import { buildSession, WORLD1_MODULES } from './questionData.js'
+import { WORLD2_MODULES } from './questionData2.js'
+import { WORLD3_MODULES } from './questionData3.js'
+import { WORLD4_MODULES } from './questionData4.js'
 
 // ─── World definitions ────────────────────────────────────────────────────────
 
@@ -21,8 +24,8 @@ const WORLDS = [
     emoji: '🌍',
     tint: '#E3F2FD',
     border: '#4DAAAA',
-    locked: true,
-    modules: [],
+    locked: false,
+    modules: WORLD2_MODULES,
   },
   {
     id: 3,
@@ -31,8 +34,8 @@ const WORLDS = [
     emoji: '⏳',
     tint: '#FFF8E1',
     border: '#E8963E',
-    locked: true,
-    modules: [],
+    locked: false,
+    modules: WORLD3_MODULES,
   },
   {
     id: 4,
@@ -41,8 +44,8 @@ const WORLDS = [
     emoji: '🎨',
     tint: '#FCE4EC',
     border: '#D45B5B',
-    locked: true,
-    modules: [],
+    locked: false,
+    modules: WORLD4_MODULES,
   },
 ]
 
@@ -51,7 +54,12 @@ const WORLDS = [
 const STORAGE_KEY = 'wakuwaku_progress'
 
 function freshProgress() {
-  return { w1: { m1: null, m2: null, m3: null, m4: null } }
+  return {
+    w1: { m1: null, m2: null, m3: null, m4: null },
+    w2: { m1: null, m2: null, m3: null, m4: null },
+    w3: { m1: null, m2: null, m3: null },
+    w4: { m1: null, m2: null, m3: null },
+  }
 }
 
 function loadProgress() {
@@ -162,7 +170,7 @@ function ParentPanel({ progress, onRestore, onReset, onClose }) {
   function handleImport() {
     try {
       const parsed = JSON.parse(atob(importVal.trim()))
-      if (typeof parsed !== 'object' || parsed === null || !('w1' in parsed)) throw new Error('bad')
+      if (typeof parsed !== 'object' || parsed === null || !('w1' in parsed) || !('w2' in parsed) || !('w3' in parsed) || !('w4' in parsed)) throw new Error('bad')
       onRestore(parsed)
       setImportStatus('ok')
       setTimeout(onClose, 800)
