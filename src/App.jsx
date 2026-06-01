@@ -213,7 +213,7 @@ function ParentPanel({ progress, onRestore, onReset, onClose }) {
   const [cloudPin,  setCloudPin]    = useState('')
   const [cloudStatus, setCloudStatus] = useState(null)
   // null | 'saving' | 'loading' | 'ok-save' | 'ok-load'
-  // | 'err-pin' | 'err-notfound' | 'err'
+  // | 'err-auth' | 'err-rate' | 'err'
 
   const cloudReady = cloudName.trim().length > 0 && cloudPin.length === 4
 
@@ -230,10 +230,10 @@ function ParentPanel({ progress, onRestore, onReset, onClose }) {
         headers: { 'Content-Type': 'application/json' },
         body:    JSON.stringify({ name: cloudName.trim(), pin: cloudPin, progress }),
       })
-      const data = await r.json()
-      if (r.status === 403)     { setCloudStatus('err-pin');      resetCloudStatus() }
-      else if (!r.ok)           { setCloudStatus('err');           resetCloudStatus() }
-      else                      { setCloudStatus('ok-save');       resetCloudStatus() }
+      if (r.status === 429)         { setCloudStatus('err-rate'); resetCloudStatus() }
+      else if (r.status === 403)    { setCloudStatus('err-auth'); resetCloudStatus() }
+      else if (!r.ok)               { setCloudStatus('err');      resetCloudStatus() }
+      else                          { setCloudStatus('ok-save');  resetCloudStatus() }
     } catch {
       setCloudStatus('err')
       resetCloudStatus()
@@ -249,10 +249,10 @@ function ParentPanel({ progress, onRestore, onReset, onClose }) {
         headers: { 'Content-Type': 'application/json' },
         body:    JSON.stringify({ name: cloudName.trim(), pin: cloudPin }),
       })
-      const data = await r.json()
-      if (r.status === 404)     { setCloudStatus('err-notfound'); resetCloudStatus() }
-      else if (r.status === 403){ setCloudStatus('err-pin');      resetCloudStatus() }
-      else if (!r.ok)           { setCloudStatus('err');          resetCloudStatus() }
+      const data = r.ok ? await r.json() : null
+      if (r.status === 429)         { setCloudStatus('err-rate'); resetCloudStatus() }
+      else if (r.status === 403)    { setCloudStatus('err-auth'); resetCloudStatus() }
+      else if (!r.ok)               { setCloudStatus('err');      resetCloudStatus() }
       else {
         const p = data.progress
         if (!('streak' in p))     p.streak     = 0
@@ -270,11 +270,11 @@ function ParentPanel({ progress, onRestore, onReset, onClose }) {
   const cloudMsg = {
     'saving':       { text: 'Saving…',           color: 'var(--amber)' },
     'loading':      { text: 'Loading…',           color: 'var(--teal)'  },
-    'ok-save':      { text: '✅ Saved!',          color: 'var(--green)' },
-    'ok-load':      { text: '✅ Loaded!',         color: 'var(--green)' },
-    'err-pin':      { text: '❌ Wrong PIN',       color: 'var(--red)'   },
-    'err-notfound': { text: '❌ Profile not found', color: 'var(--red)' },
-    'err':          { text: '❌ Error — try again', color: 'var(--red)' },
+    'ok-save':      { text: '✅ Saved!',                color: 'var(--green)' },
+    'ok-load':      { text: '✅ Loaded!',               color: 'var(--green)' },
+    'err-auth':     { text: '❌ Invalid profile or PIN', color: 'var(--red)'   },
+    'err-rate':     { text: '⏳ Too many tries — wait a bit', color: 'var(--red)' },
+    'err':          { text: '❌ Error — try again',     color: 'var(--red)'   },
   }[cloudStatus] ?? null
 
   // ── Token backup state ────────────────────────────────────────────────────

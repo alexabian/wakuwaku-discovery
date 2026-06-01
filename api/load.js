@@ -1,34 +1,45 @@
 import { Redis } from '@upstash/redis'
 import { createHash } from 'crypto'
+import {
+  applyCors,
+  enforceRateLimit,
+  hashInputSecret,
+  invalidCredentials,
+  normaliseName,
+  tooManyRequests,
+} from './_security.js'
 
 const kv = new Redis({
-  url:   process.env.UPSTASH_REDIS_REST_URL,
+  url: process.env.UPSTASH_REDIS_REST_URL,
   token: process.env.UPSTASH_REDIS_REST_TOKEN,
 })
 
-const normalise = s => s.toLowerCase().trim().replace(/\s+/g, '')
-const hashPin   = (name, pin) =>
-  createHash('sha256').update(`${normalise(name)}:${pin}:wkwk2024`).digest('hex')
-
 export default async function handler(req, res) {
-  res.setHeader('Access-Control-Allow-Origin', '*')
+  const cors = applyCors(req, res)
+  if (!cors.ok) return res.status(cors.status).json(cors.body)
+  if (req.method === 'OPTIONS') return res.status(204).end()
   if (req.method !== 'POST') return res.status(405).end()
 
   const { name, pin } = req.body ?? {}
 
-  if (!name?.trim() || String(pin).length !== 4)
+  if (!name?.trim() || !/^\d{4}$/.test(String(pin))) {
     return res.status(400).json({ error: 'missing_fields' })
+  }
 
   try {
-    const key    = `profile:${normalise(name)}`
+    const rateLimit = await enforceRateLimit(kv, req, 'load', name)
+    if (!rateLimit.allowed) return tooManyRequests(res, rateLimit.retryAfter)
+
+    const key = `profile:${normaliseName(name)}`
     const record = await kv.get(key)
 
-    if (!record)                                return res.status(404).json({ error: 'not_found' })
-    if (record.pinHash !== hashPin(name, pin))  return res.status(403).json({ error: 'wrong_pin' })
+    if (!record || record.pinHash !== hashInputSecret(createHash, name, pin)) {
+      return invalidCredentials(res)
+    }
 
-    res.status(200).json({ progress: record.progress })
+    return res.status(200).json({ progress: record.progress })
   } catch (err) {
     console.error('load error', err)
-    res.status(500).json({ error: 'server_error' })
+    return res.status(500).json({ error: 'server_error' })
   }
 }
