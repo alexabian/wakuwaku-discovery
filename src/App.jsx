@@ -1,10 +1,10 @@
 import { useState, useCallback } from 'react'
-import { buildSession, WORLD1_MODULES } from './questionData.js'
+import { buildSession, shuffle, WORLD1_MODULES } from './questionData.js'
 import { WORLD2_MODULES } from './questionData2.js'
 import { WORLD3_MODULES } from './questionData3.js'
 import { WORLD4_MODULES } from './questionData4.js'
 import ParentPanel from './ParentPanel.jsx'
-import { freshProgress, loadProgress, saveProgress, stampStreak } from './progress.js'
+import { completeDaily, freshProgress, getTodayStr, loadProgress, saveProgress, stampStreak } from './progress.js'
 
 // ─── World definitions ────────────────────────────────────────────────────────
 
@@ -51,16 +51,16 @@ const WORLDS = [
   },
 ]
 
-// ─── Streak helpers ───────────────────────────────────────────────────────────
+const SESSION_LENGTH = 10
 
 // ─── Explorer rank ────────────────────────────────────────────────────────────
 
 const RANKS = [
   { min: 36, jp: 'でんせつのたんけんか', en: 'Legendary Explorer', emoji: '🌟' },
-  { min: 25, jp: 'マスタータンけんか',   en: 'Master Explorer',    emoji: '🏆' },
-  { min: 14, jp: 'じゅくれんたんけんか', en: 'Senior Explorer',    emoji: '🔭' },
-  { min: 5,  jp: 'たんけんか',           en: 'Explorer',           emoji: '🧭' },
-  { min: 0,  jp: 'みならいたんけんか',   en: 'Apprentice Explorer', emoji: '🗺️' },
+  { min: 25, jp: 'マスタータンけんか', en: 'Master Explorer', emoji: '🏆' },
+  { min: 14, jp: 'じゅくれんたんけんか', en: 'Senior Explorer', emoji: '🔭' },
+  { min: 5, jp: 'たんけんか', en: 'Explorer', emoji: '🧭' },
+  { min: 0, jp: 'みならいたんけんか', en: 'Apprentice Explorer', emoji: '🗺️' },
 ]
 
 function getExplorerRank(totalStars) {
@@ -102,6 +102,191 @@ function getModuleRecord(progress, worldId, moduleId) {
   const wKey = `w${worldId}`
   const mKey = `m${moduleId}`
   return progress[wKey]?.[mKey] ?? null
+}
+
+function getCompletedModulesCount(progress) {
+  return WORLDS.reduce((sum, world) =>
+    sum + world.modules.filter(mod => !!getModuleRecord(progress, world.id, mod.id)).length
+  , 0)
+}
+
+function getGoldModulesCount(progress) {
+  return WORLDS.reduce((sum, world) =>
+    sum + world.modules.filter(mod => getModuleRecord(progress, world.id, mod.id)?.stars === 3).length
+  , 0)
+}
+
+function getUnlockedModules(progress) {
+  return WORLDS.flatMap(world =>
+    world.modules
+      .filter(mod => isModuleUnlocked(progress, world.id, mod.id))
+      .map(mod => ({ world, mod }))
+  )
+}
+
+function getWorldCompletion(world, progress) {
+  const completed = world.modules.filter(mod => !!getModuleRecord(progress, world.id, mod.id)).length
+  const gold = world.modules.filter(mod => getModuleRecord(progress, world.id, mod.id)?.stars === 3).length
+  return {
+    completed,
+    total: world.modules.length,
+    gold,
+    percent: Math.round((completed / world.modules.length) * 100),
+  }
+}
+
+function hashString(text) {
+  let hash = 0
+  for (let i = 0; i < text.length; i += 1) {
+    hash = (hash * 31 + text.charCodeAt(i)) >>> 0
+  }
+  return hash
+}
+
+function orderWithSeed(items, seed, keyFn = item => item.key) {
+  if (!seed) return shuffle(items)
+  return [...items].sort((a, b) => {
+    const aHash = hashString(`${seed}:${keyFn(a)}`)
+    const bHash = hashString(`${seed}:${keyFn(b)}`)
+    return aHash - bHash
+  })
+}
+
+function getModuleQuestionEntries(world, mod) {
+  const questions = [...mod.data.pool1, ...mod.data.pool2]
+  return questions.map((question, index) => ({
+    key: `w${world.id}-m${mod.id}-q${index}-${question.correctJp}`,
+    world,
+    mod,
+    question,
+  }))
+}
+
+function materialiseSession(entries, seed = null) {
+  return entries.map((entry, index) => {
+    const choices = seed
+      ? orderWithSeed(entry.question.choices, `${seed}:${entry.key}:choices`, choice => choice.jp)
+      : shuffle(entry.question.choices)
+
+    return {
+      ...entry.question,
+      choices,
+      correctJp: entry.question.correctJp,
+      sourceWorldId: entry.world.id,
+      sourceModuleId: entry.mod.id,
+      sourceLabelJp: entry.mod.titleJp,
+      sourceLabelEn: entry.mod.titleEn,
+      sourceWorldLabelEn: entry.world.titleEn,
+      sessionIndex: index,
+    }
+  })
+}
+
+function buildExplorerSession(progress, seed = null) {
+  const unlockedModules = getUnlockedModules(progress)
+  if (unlockedModules.length === 0) return []
+
+  const orderedModules = orderWithSeed(
+    unlockedModules.map(({ world, mod }) => ({
+      key: `w${world.id}-m${mod.id}`,
+      world,
+      mod,
+      entries: getModuleQuestionEntries(world, mod),
+    })),
+    seed ? `${seed}:modules` : null,
+  )
+
+  const selected = []
+  const seen = new Set()
+
+  for (const moduleBundle of orderedModules) {
+    if (selected.length >= SESSION_LENGTH) break
+    const orderedEntries = orderWithSeed(moduleBundle.entries, seed ? `${seed}:${moduleBundle.key}` : null)
+    const firstFresh = orderedEntries.find(entry => !seen.has(entry.key))
+    if (!firstFresh) continue
+    selected.push(firstFresh)
+    seen.add(firstFresh.key)
+  }
+
+  const remainingPool = orderedModules.flatMap(moduleBundle =>
+    orderWithSeed(moduleBundle.entries, seed ? `${seed}:${moduleBundle.key}:rest` : null)
+  )
+
+  for (const entry of remainingPool) {
+    if (selected.length >= SESSION_LENGTH) break
+    if (seen.has(entry.key)) continue
+    selected.push(entry)
+    seen.add(entry.key)
+  }
+
+  return materialiseSession(selected.slice(0, SESSION_LENGTH), seed)
+}
+
+function buildDailySession(progress) {
+  return buildExplorerSession(progress, `daily:${getTodayStr()}`)
+}
+
+function getDailyChallengeStatus(progress) {
+  const today = getTodayStr()
+  return {
+    completedToday: progress.daily?.lastCompleted === today,
+    streak: progress.daily?.streak || 0,
+  }
+}
+
+function buildHomeQuests(progress) {
+  const daily = getDailyChallengeStatus(progress)
+  const quests = [
+    {
+      id: 'daily',
+      emoji: daily.completedToday ? '✅' : '📅',
+      jp: daily.completedToday ? 'きょうの はっけん クリア！' : 'きょうの はっけんを 1つ クリア',
+      en: daily.completedToday ? 'Daily Discovery complete!' : 'Finish today’s Daily Discovery',
+      done: daily.completedToday,
+    },
+  ]
+
+  const firstNotGold = WORLDS.flatMap(world =>
+    world.modules
+      .map(mod => ({ world, mod, record: getModuleRecord(progress, world.id, mod.id) }))
+      .filter(item => item.record && item.record.stars < 3)
+  )[0]
+
+  if (firstNotGold) {
+    quests.push({
+      id: 'gold',
+      emoji: '🥇',
+      jp: `${firstNotGold.mod.titleJp} を ゴールドに！`,
+      en: `Earn Gold in ${firstNotGold.mod.titleEn}`,
+      done: false,
+    })
+  } else {
+    const nextLocked = WORLDS.flatMap(world =>
+      world.modules
+        .map(mod => ({ world, mod, unlocked: isModuleUnlocked(progress, world.id, mod.id) }))
+        .filter(item => !item.unlocked)
+    )[0]
+
+    if (nextLocked) {
+      quests.push({
+        id: 'unlock',
+        emoji: '🔓',
+        jp: `${nextLocked.world.titleJp} の つぎを アンロック！`,
+        en: `Unlock the next ${nextLocked.world.titleEn} lesson`,
+        done: false,
+      })
+    } else {
+      quests.push({
+        id: 'mastery',
+        emoji: '✨',
+        jp: 'ぜんぶの せかいを マスターしよう！',
+        en: 'Polish every world to mastery!',
+        done: getGoldModulesCount(progress) === WORLDS.reduce((sum, world) => sum + world.modules.length, 0),
+      })
+    }
+  }
+
+  return quests.slice(0, 2)
 }
 
 // ─── Background ───────────────────────────────────────────────────────────────
@@ -165,16 +350,20 @@ function AnswerBtn({ choice, state, onClick, disabled }) {
 
 // ─── Home screen ──────────────────────────────────────────────────────────────
 
-function HomeScreen({ progress, onSelectWorld, onParent }) {
+function HomeScreen({ progress, onSelectWorld, onParent, onPlayMix, onPlayDaily }) {
   const totalStars = totalStarsAllWorlds(progress)
   const rank = getExplorerRank(totalStars)
   const streak = progress.streak || 0
+  const daily = getDailyChallengeStatus(progress)
+  const completedLessons = getCompletedModulesCount(progress)
+  const goldLessons = getGoldModulesCount(progress)
+  const sessionsPlayed = progress.stats?.sessionsPlayed || 0
+  const quests = buildHomeQuests(progress)
 
   return (
     <div className="screen" style={{ paddingTop: 20 }}>
       <ParchmentBg />
       <div style={{ position: 'relative', zIndex: 1, width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 18 }}>
-
         <div style={{ width: '100%', display: 'flex', justifyContent: 'flex-end' }}>
           <button
             onClick={onParent}
@@ -198,11 +387,7 @@ function HomeScreen({ progress, onSelectWorld, onParent }) {
           </div>
         </div>
 
-        {/* ── Rank + Streak bar ── */}
-        <div style={{
-          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10,
-          width: '100%',
-        }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, width: '100%', flexWrap: 'wrap' }}>
           <div style={{
             display: 'flex', alignItems: 'center', gap: 6,
             background: 'white', border: '2px solid var(--sand)',
@@ -238,13 +423,122 @@ function HomeScreen({ progress, onSelectWorld, onParent }) {
           </div>
         </div>
 
-        {/* ── World cards ── */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10, width: '100%' }}>
+          <div style={{ background: 'white', border: '2px solid var(--sand)', borderRadius: 18, padding: '12px 10px', textAlign: 'center', boxShadow: '0 2px 0 var(--sand)' }}>
+            <div style={{ fontSize: 20 }}>⭐</div>
+            <div style={{ fontFamily: 'var(--font-en)', fontSize: 18, fontWeight: 900, color: 'var(--amber)' }}>{totalStars}</div>
+            <div className="en-label" style={{ fontSize: 10 }}>total stars</div>
+          </div>
+          <div style={{ background: 'white', border: '2px solid var(--sand)', borderRadius: 18, padding: '12px 10px', textAlign: 'center', boxShadow: '0 2px 0 var(--sand)' }}>
+            <div style={{ fontSize: 20 }}>📘</div>
+            <div style={{ fontFamily: 'var(--font-en)', fontSize: 18, fontWeight: 900, color: 'var(--teal)' }}>{completedLessons}</div>
+            <div className="en-label" style={{ fontSize: 10 }}>lessons done</div>
+          </div>
+          <div style={{ background: 'white', border: '2px solid var(--sand)', borderRadius: 18, padding: '12px 10px', textAlign: 'center', boxShadow: '0 2px 0 var(--sand)' }}>
+            <div style={{ fontSize: 20 }}>🥇</div>
+            <div style={{ fontFamily: 'var(--font-en)', fontSize: 18, fontWeight: 900, color: 'var(--green)' }}>{goldLessons}</div>
+            <div className="en-label" style={{ fontSize: 10 }}>gold crowns</div>
+          </div>
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, width: '100%' }}>
+          <button
+            onClick={onPlayDaily}
+            style={{
+              background: daily.completedToday ? 'linear-gradient(135deg, #E8F5E9, #F3FAF4)' : 'linear-gradient(135deg, #FFF8E1, #FFF3CD)',
+              border: `3px solid ${daily.completedToday ? 'var(--green)' : 'var(--amber)'}`,
+              borderRadius: 22,
+              padding: '16px 14px',
+              textAlign: 'left',
+              boxShadow: `0 4px 0 ${daily.completedToday ? '#4E8F4E' : '#BF6A1F'}`,
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+              <div style={{ fontSize: 28 }}>{daily.completedToday ? '✅' : '📅'}</div>
+              <div style={{
+                background: 'rgba(255,255,255,0.85)', borderRadius: 999,
+                padding: '5px 9px', fontFamily: 'var(--font-en)', fontSize: 11, fontWeight: 800,
+                color: daily.completedToday ? 'var(--green)' : 'var(--amber)',
+              }}>
+                {daily.completedToday ? 'DONE TODAY' : 'NEW TODAY'}
+              </div>
+            </div>
+            <div style={{ fontFamily: 'var(--font-jp)', fontSize: 16, fontWeight: 800, color: 'var(--brown)', marginTop: 8 }}>
+              きょうの はっけん
+            </div>
+            <div className="en-label" style={{ fontSize: 11, marginTop: 2, opacity: 0.8 }}>Daily Discovery</div>
+            <div style={{ marginTop: 8, fontFamily: 'var(--font-jp)', fontSize: 12, fontWeight: 700, color: 'var(--brown-mid)', lineHeight: 1.4 }}>
+              {daily.completedToday ? 'もういちど できるよ！' : 'まいにち かわる チャレンジ'}
+            </div>
+            <div className="en-label" style={{ fontSize: 10, marginTop: 6 }}>Daily streak: {daily.streak}</div>
+          </button>
+
+          <button
+            onClick={onPlayMix}
+            style={{
+              background: 'linear-gradient(135deg, #EAF6FF, #F3FBFF)',
+              border: '3px solid var(--teal)',
+              borderRadius: 22,
+              padding: '16px 14px',
+              textAlign: 'left',
+              boxShadow: '0 4px 0 #2A8B8B',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+              <div style={{ fontSize: 28 }}>🧭</div>
+              <div style={{
+                background: 'rgba(255,255,255,0.85)', borderRadius: 999,
+                padding: '5px 9px', fontFamily: 'var(--font-en)', fontSize: 11, fontWeight: 800,
+                color: 'var(--teal)',
+              }}>
+                MIX MODE
+              </div>
+            </div>
+            <div style={{ fontFamily: 'var(--font-jp)', fontSize: 16, fontWeight: 800, color: 'var(--brown)', marginTop: 8 }}>
+              たんけん ミックス
+            </div>
+            <div className="en-label" style={{ fontSize: 11, marginTop: 2, opacity: 0.8 }}>Explorer Mix</div>
+            <div style={{ marginTop: 8, fontFamily: 'var(--font-jp)', fontSize: 12, fontWeight: 700, color: 'var(--brown-mid)', lineHeight: 1.4 }}>
+              アンロックした レッスンから 10もん！
+            </div>
+            <div className="en-label" style={{ fontSize: 10, marginTop: 6 }}>mix plays: {progress.stats?.mixPlays || 0}</div>
+          </button>
+        </div>
+
+        <div style={{ width: '100%', background: 'white', border: '2px solid var(--sand)', borderRadius: 22, padding: '14px 16px', boxShadow: '0 3px 0 var(--sand)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+            <div>
+              <div style={{ fontFamily: 'var(--font-jp)', fontSize: 16, fontWeight: 800, color: 'var(--brown)' }}>きょうの クエスト</div>
+              <div className="en-label" style={{ fontSize: 11 }}>Today’s quests</div>
+            </div>
+            <div style={{ fontFamily: 'var(--font-en)', fontSize: 11, fontWeight: 800, color: 'var(--brown-mid)' }}>{sessionsPlayed} plays</div>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 10 }}>
+            {quests.map(quest => (
+              <div key={quest.id} style={{
+                display: 'flex', alignItems: 'center', gap: 10,
+                background: quest.done ? '#F3FAF4' : '#F9F5EE',
+                border: `1.5px solid ${quest.done ? 'var(--green)' : 'var(--bg-alt)'}`,
+                borderRadius: 16,
+                padding: '10px 12px',
+              }}>
+                <span style={{ fontSize: 22 }}>{quest.emoji}</span>
+                <div style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
+                  <div style={{ fontFamily: 'var(--font-jp)', fontSize: 13, fontWeight: 700, color: 'var(--brown)' }}>{quest.jp}</div>
+                  <div className="en-label" style={{ fontSize: 10, marginTop: 2 }}>{quest.en}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, width: '100%' }}>
           {WORLDS.map(world => {
             const crowns = world.modules.map(mod => {
               const rec = getModuleRecord(progress, world.id, mod.id)
               return rec ? getCrown(rec.stars) : null
             })
+            const completion = getWorldCompletion(world, progress)
             const goldCount = crowns.filter(c => c === '🥇').length
 
             return (
@@ -265,16 +559,27 @@ function HomeScreen({ progress, onSelectWorld, onParent }) {
                     🔒 もうすぐ！
                   </div>
                 ) : (
-                  <div style={{ marginTop: 6, display: 'flex', gap: 3, alignItems: 'center' }}>
-                    {crowns.map((crown, i) => (
-                      <span key={i} style={{ fontSize: 16, opacity: crown ? 1 : 0.25 }}>
-                        {crown ?? '🥇'}
-                      </span>
-                    ))}
-                    {goldCount === world.modules.length && world.modules.length > 0 && (
-                      <span style={{ fontSize: 14, marginLeft: 2 }}>✨</span>
-                    )}
-                  </div>
+                  <>
+                    <div style={{ width: '100%', marginTop: 8 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                        <span className="en-label" style={{ fontSize: 10 }}>progress</span>
+                        <span className="en-label" style={{ fontSize: 10 }}>{completion.completed}/{completion.total}</span>
+                      </div>
+                      <div className="progress-track" style={{ height: 8 }}>
+                        <div className="progress-fill" style={{ width: `${completion.percent}%` }} />
+                      </div>
+                    </div>
+                    <div style={{ marginTop: 6, display: 'flex', gap: 3, alignItems: 'center', flexWrap: 'wrap', justifyContent: 'center' }}>
+                      {crowns.map((crown, i) => (
+                        <span key={i} style={{ fontSize: 16, opacity: crown ? 1 : 0.25 }}>
+                          {crown ?? '🥇'}
+                        </span>
+                      ))}
+                      {goldCount === world.modules.length && world.modules.length > 0 && (
+                        <span style={{ fontSize: 14, marginLeft: 2 }}>✨</span>
+                      )}
+                    </div>
+                  </>
                 )}
               </button>
             )
@@ -288,11 +593,12 @@ function HomeScreen({ progress, onSelectWorld, onParent }) {
 // ─── World screen ─────────────────────────────────────────────────────────────
 
 function WorldScreen({ world, progress, onBack, onSelectModule }) {
+  const completion = getWorldCompletion(world, progress)
+
   return (
     <div className="screen" style={{ paddingTop: 16 }}>
       <ParchmentBg />
       <div style={{ position: 'relative', zIndex: 1, width: '100%', display: 'flex', flexDirection: 'column', gap: 16 }}>
-
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <button className="back-btn" onClick={onBack}>← もどる</button>
         </div>
@@ -303,6 +609,15 @@ function WorldScreen({ world, progress, onBack, onSelectModule }) {
             {world.titleJp}
           </div>
           <div className="en-label" style={{ fontSize: 13 }}>{world.titleEn}</div>
+          <div style={{ marginTop: 10, background: 'white', border: '2px solid var(--sand)', borderRadius: 18, padding: '10px 12px', boxShadow: '0 2px 0 var(--sand)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+              <span className="en-label" style={{ fontSize: 10 }}>world progress</span>
+              <span className="en-label" style={{ fontSize: 10 }}>{completion.completed}/{completion.total} complete · {completion.gold} gold</span>
+            </div>
+            <div className="progress-track" style={{ height: 8 }}>
+              <div className="progress-fill" style={{ width: `${completion.percent}%` }} />
+            </div>
+          </div>
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -353,7 +668,7 @@ function WorldScreen({ world, progress, onBack, onSelectModule }) {
 
 // ─── Quiz screen ──────────────────────────────────────────────────────────────
 
-function QuizScreen({ module, session, qIndex, wrongCount, onAnswer, onBack }) {
+function QuizScreen({ sessionMeta, session, qIndex, onAnswer, onBack }) {
   const [btnStates, setBtnStates] = useState({})
   const [locked, setLocked] = useState(false)
   const [owlMood, setOwlMood] = useState('neutral')
@@ -396,17 +711,36 @@ function QuizScreen({ module, session, qIndex, wrongCount, onAnswer, onBack }) {
     <div className="screen" style={{ paddingTop: 16 }}>
       <ParchmentBg />
       <div style={{ position: 'relative', zIndex: 1, width: '100%', display: 'flex', flexDirection: 'column', gap: 16 }}>
-
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <button className="back-btn" onClick={onBack}>← もどる</button>
           <div style={{ flex: 1 }} />
           <span style={{ fontFamily: 'var(--font-en)', fontSize: 13, fontWeight: 700, color: 'var(--brown-mid)' }}>
-            {qIndex + 1} / 10
+            {qIndex + 1} / {session.length}
           </span>
         </div>
 
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
+          <div style={{
+            display: 'inline-flex', alignItems: 'center', gap: 7,
+            background: 'white', border: '2px solid var(--sand)', borderRadius: 999,
+            padding: '7px 12px', boxShadow: '0 2px 0 var(--sand)',
+          }}>
+            <span style={{ fontSize: 18 }}>{sessionMeta?.emoji || '🦉'}</span>
+            <div>
+              <div style={{ fontFamily: 'var(--font-jp)', fontSize: 12, fontWeight: 700, color: 'var(--brown)' }}>{sessionMeta?.titleJp}</div>
+              <div className="en-label" style={{ fontSize: 10 }}>{sessionMeta?.titleEn}</div>
+            </div>
+          </div>
+          {(sessionMeta?.kind === 'mix' || sessionMeta?.kind === 'daily') && q?.sourceLabelEn && (
+            <div style={{ textAlign: 'right' }}>
+              <div style={{ fontFamily: 'var(--font-jp)', fontSize: 11, fontWeight: 700, color: 'var(--brown-mid)' }}>{q.sourceLabelJp}</div>
+              <div className="en-label" style={{ fontSize: 10 }}>{q.sourceLabelEn}</div>
+            </div>
+          )}
+        </div>
+
         <div className="progress-track">
-          <div className="progress-fill" style={{ width: `${((qIndex + (locked ? 1 : 0)) / 10) * 100}%` }} />
+          <div className="progress-fill" style={{ width: `${((qIndex + (locked ? 1 : 0)) / session.length) * 100}%` }} />
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, paddingTop: 8 }}>
@@ -450,33 +784,38 @@ function QuizScreen({ module, session, qIndex, wrongCount, onAnswer, onBack }) {
 
 // ─── Completion screen ────────────────────────────────────────────────────────
 
-function CompletionScreen({ module, stars, wrongCount, rankUp, newStreak, onReplay, onBack }) {
+function CompletionScreen({ sessionMeta, stars, wrongCount, rankUp, newStreak, completionDetails, onReplay, onBack }) {
   const crown = getCrown(stars)
+  const kind = sessionMeta?.kind || 'module'
+  const titleEn = sessionMeta?.titleEn || 'Lesson'
+  const titleJp = sessionMeta?.titleJp || 'レッスン'
+
   return (
     <div className="screen slideup-anim" style={{ paddingTop: 24, justifyContent: 'center', minHeight: '100%' }}>
       <ParchmentBg />
       <div style={{ position: 'relative', zIndex: 1, width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16 }}>
-
-        <div className="bounce-anim" style={{ fontSize: 68, lineHeight: 1 }}>🦉</div>
+        <div className="bounce-anim" style={{ fontSize: 68, lineHeight: 1 }}>{sessionMeta?.emoji || '🦉'}</div>
 
         <div style={{ textAlign: 'center' }}>
           <div style={{ fontFamily: 'var(--font-jp)', fontSize: 24, fontWeight: 900, color: 'var(--brown)' }}>
             おわった！
           </div>
           <div className="en-label" style={{ fontSize: 13, marginTop: 2 }}>
-            {module.titleEn} complete
+            {titleEn} complete
+          </div>
+          <div style={{ fontFamily: 'var(--font-jp)', fontSize: 15, fontWeight: 700, color: 'var(--brown-mid)', marginTop: 6 }}>
+            {titleJp}
           </div>
         </div>
 
-        {/* ── Crown earned ── */}
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
           <span className="bounce-anim" style={{ fontSize: 64, lineHeight: 1, animationDelay: '0.15s' }}>{crown}</span>
           <div style={{ fontFamily: 'var(--font-en)', fontSize: 13, fontWeight: 700, color: 'var(--brown-mid)' }}>
             {stars === 3 ? 'Gold Crown!' : stars === 2 ? 'Silver Crown!' : 'Bronze Crown!'}
           </div>
+          <Stars count={stars} size={20} />
         </div>
 
-        {/* ── Performance card ── */}
         <div style={{
           background: 'white', border: '2.5px solid var(--sand)',
           borderRadius: 20, padding: '14px 24px', textAlign: 'center', width: '100%',
@@ -496,7 +835,7 @@ function CompletionScreen({ module, stars, wrongCount, rankUp, newStreak, onRepl
               {wrongCount} wrong {wrongCount === 1 ? 'tap' : 'taps'}
             </div>
           )}
-          {stars < 3 && (
+          {kind === 'module' && stars < 3 && (
             <div style={{
               marginTop: 10, padding: '8px 12px', borderRadius: 12,
               background: '#FFF8E1', border: '1.5px solid var(--amber)',
@@ -508,9 +847,54 @@ function CompletionScreen({ module, stars, wrongCount, rankUp, newStreak, onRepl
               </div>
             </div>
           )}
+          {kind !== 'module' && stars < 3 && (
+            <div style={{
+              marginTop: 10, padding: '8px 12px', borderRadius: 12,
+              background: '#EAF6FF', border: '1.5px solid var(--teal)',
+              fontFamily: 'var(--font-jp)', fontSize: 13, color: 'var(--teal)', fontWeight: 700,
+            }}>
+              🔄 もういちど ちょうせん！
+              <div style={{ fontFamily: 'var(--font-en)', fontSize: 11, fontWeight: 600, opacity: 0.8, marginTop: 2 }}>
+                Try again for a perfect 3-star run.
+              </div>
+            </div>
+          )}
         </div>
 
-        {/* ── Rank-up banner ── */}
+        {completionDetails?.dailyAwarded && (
+          <div className="rankup-banner" style={{
+            width: '100%', borderRadius: 20, padding: '14px 20px', textAlign: 'center',
+            background: 'linear-gradient(135deg, #FFF8E1, #FFF3CD)',
+            border: '2.5px solid var(--amber)',
+            boxShadow: '0 4px 16px rgba(232,150,62,0.3)',
+          }}>
+            <div style={{ fontSize: 11, fontFamily: 'var(--font-en)', fontWeight: 700, color: 'var(--amber)', letterSpacing: '0.08em', marginBottom: 4 }}>
+              DAILY DISCOVERY
+            </div>
+            <div style={{ fontSize: 32 }}>📅</div>
+            <div style={{ fontFamily: 'var(--font-jp)', fontSize: 16, fontWeight: 800, color: 'var(--brown)', marginTop: 4 }}>
+              きょうの スタンプ げっと！
+            </div>
+            <div className="en-label" style={{ fontSize: 12, marginTop: 2 }}>
+              Daily streak: {completionDetails.dailyStreak}
+            </div>
+          </div>
+        )}
+
+        {kind === 'mix' && (
+          <div style={{
+            width: '100%', borderRadius: 20, padding: '12px 18px', textAlign: 'center',
+            background: '#EAF6FF', border: '2px solid var(--teal)',
+          }}>
+            <div style={{ fontFamily: 'var(--font-jp)', fontSize: 15, fontWeight: 800, color: 'var(--brown)' }}>
+              いろんな せかいを たんけんしたね！
+            </div>
+            <div className="en-label" style={{ fontSize: 12, marginTop: 3 }}>
+              Mixed questions from your unlocked lessons.
+            </div>
+          </div>
+        )}
+
         {rankUp && (
           <div className="rankup-banner" style={{
             width: '100%', borderRadius: 20, padding: '14px 20px', textAlign: 'center',
@@ -529,7 +913,6 @@ function CompletionScreen({ module, stars, wrongCount, rankUp, newStreak, onRepl
           </div>
         )}
 
-        {/* ── Streak badge ── */}
         {newStreak && (
           <div className="streak-pop" style={{
             display: 'flex', alignItems: 'center', gap: 8,
@@ -546,7 +929,6 @@ function CompletionScreen({ module, stars, wrongCount, rankUp, newStreak, onRepl
           </div>
         )}
 
-        {/* ── Buttons ── */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10, width: '100%' }}>
           <button
             onClick={onReplay}
@@ -556,7 +938,7 @@ function CompletionScreen({ module, stars, wrongCount, rankUp, newStreak, onRepl
               color: 'white', boxShadow: '0 4px 0 #BF6A1F', width: '100%',
             }}
           >
-            もういちど 🔄
+            {kind === 'daily' ? 'きょうの はっけんを もういちど 🔄' : kind === 'mix' ? 'ミックスを もういちど 🔄' : 'もういちど 🔄'}
           </button>
           <button
             onClick={onBack}
@@ -566,7 +948,6 @@ function CompletionScreen({ module, stars, wrongCount, rankUp, newStreak, onRepl
             もどる
           </button>
         </div>
-
       </div>
     </div>
   )
@@ -578,23 +959,65 @@ export default function App() {
   const [screen, setScreen] = useState('home')
   const [activeWorld, setActiveWorld] = useState(null)
   const [activeModule, setActiveModule] = useState(null)
+  const [activeSessionMeta, setActiveSessionMeta] = useState(null)
   const [session, setSession] = useState([])
   const [qIndex, setQIndex] = useState(0)
   const [wrongCount, setWrongCount] = useState(0)
   const [completionStars, setCompletionStars] = useState(0)
+  const [completionDetails, setCompletionDetails] = useState(null)
   const [progress, setProgress] = useState(loadProgress)
   const [showParent, setShowParent] = useState(false)
   const [rankUp, setRankUp] = useState(null)
   const [streakUpdated, setStreakUpdated] = useState(null)
 
-  function startModule(world, mod) {
-    const s = buildSession(mod.data)
-    setSession(s)
+  function beginSession({ sessionItems, meta, world = null, mod = null }) {
+    if (!sessionItems.length) return
+    setSession(sessionItems)
     setQIndex(0)
     setWrongCount(0)
+    setCompletionDetails(null)
     setActiveWorld(world)
     setActiveModule(mod)
+    setActiveSessionMeta(meta)
     setScreen('quiz')
+  }
+
+  function startModule(world, mod) {
+    beginSession({
+      sessionItems: buildSession(mod.data),
+      meta: {
+        kind: 'module',
+        titleJp: mod.titleJp,
+        titleEn: mod.titleEn,
+        emoji: mod.emoji,
+      },
+      world,
+      mod,
+    })
+  }
+
+  function startExplorerMix() {
+    beginSession({
+      sessionItems: buildExplorerSession(progress),
+      meta: {
+        kind: 'mix',
+        titleJp: 'たんけん ミックス',
+        titleEn: 'Explorer Mix',
+        emoji: '🧭',
+      },
+    })
+  }
+
+  function startDaily() {
+    beginSession({
+      sessionItems: buildDailySession(progress),
+      meta: {
+        kind: 'daily',
+        titleJp: 'きょうの はっけん',
+        titleEn: 'Daily Discovery',
+        emoji: '📅',
+      },
+    })
   }
 
   function handleAnswer(correct) {
@@ -602,40 +1025,102 @@ export default function App() {
       setWrongCount(c => c + 1)
       return
     }
-    const nextIdx = qIndex + 1
-    if (nextIdx >= session.length) {
-      const wc = wrongCount
-      const stars = getStars(wc)
-      setCompletionStars(stars)
 
+    const nextIdx = qIndex + 1
+    if (nextIdx < session.length) {
+      setQIndex(nextIdx)
+      return
+    }
+
+    const wc = wrongCount
+    const stars = getStars(wc)
+    setCompletionStars(stars)
+
+    const withStreak = stampStreak(progress)
+    const nextStats = {
+      ...withStreak.stats,
+      sessionsPlayed: (withStreak.stats?.sessionsPlayed || 0) + 1,
+      perfectSessions: (withStreak.stats?.perfectSessions || 0) + (wc === 0 ? 1 : 0),
+      mixPlays: (withStreak.stats?.mixPlays || 0) + (activeSessionMeta?.kind === 'mix' ? 1 : 0),
+      dailyPlays: (withStreak.stats?.dailyPlays || 0) + (activeSessionMeta?.kind === 'daily' ? 1 : 0),
+    }
+
+    let next = {
+      ...withStreak,
+      stats: nextStats,
+    }
+
+    let sessionRankUp = null
+    let dailyAwarded = false
+
+    if (activeSessionMeta?.kind === 'module' && activeWorld && activeModule) {
       const wKey = `w${activeWorld.id}`
       const mKey = `m${activeModule.id}`
-      const existing = progress[wKey]?.[mKey]
+      const existing = next[wKey]?.[mKey]
       const bestWrong = existing ? Math.min(existing.bestWrong, wc) : wc
       const bestStars = existing ? Math.max(existing.stars, stars) : stars
-      const withStreak = stampStreak(progress)
-      const next = {
-        ...withStreak,
-        [wKey]: { ...progress[wKey], [mKey]: { stars: bestStars, bestWrong } },
+      next = {
+        ...next,
+        [wKey]: { ...next[wKey], [mKey]: { stars: bestStars, bestWrong } },
       }
-      saveProgress(next)
-      setProgress(next)
-
       const prevRank = getExplorerRank(totalStarsAllWorlds(progress))
       const nextRank = getExplorerRank(totalStarsAllWorlds(next))
-      setRankUp(prevRank.min !== nextRank.min ? nextRank : null)
-      setStreakUpdated(withStreak.streak !== (progress.streak || 0) ? withStreak.streak : null)
-
-      setTimeout(() => setScreen('complete'), 400)
-    } else {
-      setQIndex(nextIdx)
+      sessionRankUp = prevRank.min !== nextRank.min ? nextRank : null
     }
+
+    if (activeSessionMeta?.kind === 'daily') {
+      const today = getTodayStr()
+      dailyAwarded = next.daily?.lastCompleted !== today
+      next = completeDaily(next)
+    }
+
+    saveProgress(next)
+    setProgress(next)
+    setRankUp(sessionRankUp)
+    setStreakUpdated(withStreak.streak !== (progress.streak || 0) ? withStreak.streak : null)
+    setCompletionDetails({
+      dailyAwarded,
+      dailyStreak: next.daily?.streak || 0,
+      sessionsPlayed: next.stats?.sessionsPlayed || 0,
+      perfectSessions: next.stats?.perfectSessions || 0,
+    })
+
+    setTimeout(() => setScreen('complete'), 400)
   }
 
   function handleReplay() {
     setRankUp(null)
     setStreakUpdated(null)
-    startModule(activeWorld, activeModule)
+    if (activeSessionMeta?.kind === 'daily') {
+      startDaily()
+      return
+    }
+    if (activeSessionMeta?.kind === 'mix') {
+      startExplorerMix()
+      return
+    }
+    if (activeWorld && activeModule) {
+      startModule(activeWorld, activeModule)
+    }
+  }
+
+  function handleSessionBack() {
+    if (activeSessionMeta?.kind === 'module' && activeWorld) {
+      setScreen('world')
+      return
+    }
+    setScreen('home')
+  }
+
+  function handleCompletionBack() {
+    setRankUp(null)
+    setStreakUpdated(null)
+    setCompletionDetails(null)
+    if (activeSessionMeta?.kind === 'module' && activeWorld) {
+      setScreen('world')
+      return
+    }
+    setScreen('home')
   }
 
   if (screen === 'home') {
@@ -648,6 +1133,8 @@ export default function App() {
             setScreen('world')
           }}
           onParent={() => setShowParent(true)}
+          onPlayMix={startExplorerMix}
+          onPlayDaily={startDaily}
         />
         {showParent && (
           <ParentPanel
@@ -682,12 +1169,11 @@ export default function App() {
   if (screen === 'quiz') {
     return (
       <QuizScreen
-        module={activeModule}
+        sessionMeta={activeSessionMeta}
         session={session}
         qIndex={qIndex}
-        wrongCount={wrongCount}
         onAnswer={handleAnswer}
-        onBack={() => setScreen('world')}
+        onBack={handleSessionBack}
       />
     )
   }
@@ -695,13 +1181,14 @@ export default function App() {
   if (screen === 'complete') {
     return (
       <CompletionScreen
-        module={activeModule}
+        sessionMeta={activeSessionMeta}
         stars={completionStars}
         wrongCount={wrongCount}
         rankUp={rankUp}
         newStreak={streakUpdated}
+        completionDetails={completionDetails}
         onReplay={handleReplay}
-        onBack={() => { setRankUp(null); setStreakUpdated(null); setScreen('world') }}
+        onBack={handleCompletionBack}
       />
     )
   }

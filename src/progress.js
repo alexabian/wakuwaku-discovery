@@ -29,6 +29,37 @@ function normaliseModuleRecord(record) {
   return { stars, bestWrong }
 }
 
+function normaliseDaily(raw) {
+  if (!isPlainObject(raw)) {
+    return { lastCompleted: null, streak: 0 }
+  }
+
+  return {
+    lastCompleted: typeof raw.lastCompleted === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(raw.lastCompleted)
+      ? raw.lastCompleted
+      : null,
+    streak: Number.isInteger(Number(raw.streak)) && Number(raw.streak) >= 0 ? Number(raw.streak) : 0,
+  }
+}
+
+function normaliseStats(raw) {
+  if (!isPlainObject(raw)) {
+    return {
+      sessionsPlayed: 0,
+      perfectSessions: 0,
+      mixPlays: 0,
+      dailyPlays: 0,
+    }
+  }
+
+  return {
+    sessionsPlayed: clampInteger(raw.sessionsPlayed, 0, Number.MAX_SAFE_INTEGER) ?? 0,
+    perfectSessions: clampInteger(raw.perfectSessions, 0, Number.MAX_SAFE_INTEGER) ?? 0,
+    mixPlays: clampInteger(raw.mixPlays, 0, Number.MAX_SAFE_INTEGER) ?? 0,
+    dailyPlays: clampInteger(raw.dailyPlays, 0, Number.MAX_SAFE_INTEGER) ?? 0,
+  }
+}
+
 export function freshProgress() {
   return {
     w1: { m1: null, m2: null, m3: null, m4: null },
@@ -37,6 +68,8 @@ export function freshProgress() {
     w4: { m1: null, m2: null, m3: null },
     streak: 0,
     lastPlayed: null,
+    daily: { lastCompleted: null, streak: 0 },
+    stats: { sessionsPlayed: 0, perfectSessions: 0, mixPlays: 0, dailyPlays: 0 },
   }
 }
 
@@ -62,6 +95,9 @@ export function normaliseProgress(raw) {
     ? raw.lastPlayed
     : null
 
+  next.daily = normaliseDaily(raw.daily)
+  next.stats = normaliseStats(raw.stats)
+
   return next
 }
 
@@ -84,14 +120,36 @@ export function saveProgress(progress) {
   } catch (_) {}
 }
 
-function getTodayStr() {
+export function getTodayStr() {
   return new Date().toISOString().slice(0, 10)
+}
+
+export function getPreviousDateStr(dayStr) {
+  const base = dayStr ? new Date(`${dayStr}T00:00:00Z`) : new Date(Date.now() - 86400000)
+  return new Date(base.getTime() - 86400000).toISOString().slice(0, 10)
 }
 
 export function stampStreak(progress) {
   const today = getTodayStr()
   if (progress.lastPlayed === today) return progress
-  const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10)
+  const yesterday = getPreviousDateStr(today)
   const newStreak = progress.lastPlayed === yesterday ? (progress.streak || 0) + 1 : 1
   return { ...progress, streak: newStreak, lastPlayed: today }
+}
+
+export function completeDaily(progress) {
+  const today = getTodayStr()
+  if (progress.daily?.lastCompleted === today) return progress
+
+  const previousDate = getPreviousDateStr(today)
+  const previousStreak = progress.daily?.streak || 0
+  const nextDailyStreak = progress.daily?.lastCompleted === previousDate ? previousStreak + 1 : 1
+
+  return {
+    ...progress,
+    daily: {
+      lastCompleted: today,
+      streak: nextDailyStreak,
+    },
+  }
 }
