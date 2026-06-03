@@ -8,6 +8,7 @@ import {
   normaliseName,
   tooManyRequests,
 } from './_security.js'
+import { normaliseProgress } from '../src/progress.js'
 
 const kv = new Redis({
   url: process.env.UPSTASH_REDIS_REST_URL,
@@ -22,7 +23,9 @@ export default async function handler(req, res) {
 
   const { name, pin, progress } = req.body ?? {}
 
-  if (!name?.trim() || !/^\d{4}$/.test(String(pin)) || !progress) {
+  const normalisedProgress = normaliseProgress(progress)
+
+  if (!name?.trim() || !/^\d{4}$/.test(String(pin)) || !normalisedProgress) {
     return res.status(400).json({ error: 'missing_fields' })
   }
 
@@ -39,7 +42,7 @@ export default async function handler(req, res) {
 
     await kv.set(key, {
       pinHash: hashInputSecret(createHash, name, pin),
-      progress,
+      progress: normalisedProgress,
       updatedAt: new Date().toISOString(),
     })
 

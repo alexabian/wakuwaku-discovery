@@ -8,6 +8,7 @@ import {
   normaliseName,
   tooManyRequests,
 } from './_security.js'
+import { normaliseProgress } from '../src/progress.js'
 
 const kv = new Redis({
   url: process.env.UPSTASH_REDIS_REST_URL,
@@ -37,7 +38,12 @@ export default async function handler(req, res) {
       return invalidCredentials(res)
     }
 
-    return res.status(200).json({ progress: record.progress })
+    const normalisedProgress = normaliseProgress(record.progress)
+    if (!normalisedProgress) {
+      return res.status(500).json({ error: 'invalid_saved_progress' })
+    }
+
+    return res.status(200).json({ progress: normalisedProgress })
   } catch (err) {
     console.error('load error', err)
     return res.status(500).json({ error: 'server_error' })
