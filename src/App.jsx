@@ -289,6 +289,66 @@ function buildHomeQuests(progress) {
   return quests.slice(0, 2)
 }
 
+function getPassportSummary(progress) {
+  const lessonStamps = getCompletedModulesCount(progress)
+  const goldStamps = getGoldModulesCount(progress)
+  const dailyStreak = progress.daily?.streak || 0
+  const perfectSessions = progress.stats?.perfectSessions || 0
+
+  return {
+    lessonStamps,
+    goldStamps,
+    dailyStreak,
+    perfectSessions,
+    badges: [
+      {
+        id: 'first-step',
+        unlocked: lessonStamps >= 1,
+        emoji: '🌱',
+        jp: 'はじめての スタンプ',
+        en: 'First stamp',
+      },
+      {
+        id: 'gold-hunter',
+        unlocked: goldStamps >= 3,
+        emoji: '🥇',
+        jp: 'ゴールド ハンター',
+        en: 'Gold hunter',
+      },
+      {
+        id: 'daily-friend',
+        unlocked: dailyStreak >= 3,
+        emoji: '📅',
+        jp: 'まいにち はっけん',
+        en: 'Daily discoverer',
+      },
+      {
+        id: 'owl-ace',
+        unlocked: perfectSessions >= 5,
+        emoji: '🦉',
+        jp: 'ふくろう エース',
+        en: 'Owl ace',
+      },
+    ],
+  }
+}
+
+function getNextUnlockInfo(world, mod, previousProgress) {
+  const nextModule = world?.modules.find(candidate => candidate.id === mod.id + 1)
+  if (!nextModule) return null
+
+  const wasLocked = !isModuleUnlocked(previousProgress, world.id, nextModule.id)
+  if (!wasLocked) return null
+
+  return {
+    emoji: nextModule.emoji,
+    titleJp: nextModule.titleJp,
+    titleEn: nextModule.titleEn,
+    worldJp: world.titleJp,
+    worldEn: world.titleEn,
+  }
+}
+
 // ─── Background ───────────────────────────────────────────────────────────────
 
 function ParchmentBg() {
@@ -350,7 +410,7 @@ function AnswerBtn({ choice, state, onClick, disabled }) {
 
 // ─── Home screen ──────────────────────────────────────────────────────────────
 
-function HomeScreen({ progress, onSelectWorld, onParent, onPlayMix, onPlayDaily }) {
+function HomeScreen({ progress, onSelectWorld, onParent, onPlayMix, onPlayDaily, onOpenPassport }) {
   const totalStars = totalStarsAllWorlds(progress)
   const rank = getExplorerRank(totalStars)
   const streak = progress.streak || 0
@@ -359,6 +419,7 @@ function HomeScreen({ progress, onSelectWorld, onParent, onPlayMix, onPlayDaily 
   const goldLessons = getGoldModulesCount(progress)
   const sessionsPlayed = progress.stats?.sessionsPlayed || 0
   const quests = buildHomeQuests(progress)
+  const passport = getPassportSummary(progress)
 
   return (
     <div className="screen" style={{ paddingTop: 20 }}>
@@ -440,6 +501,44 @@ function HomeScreen({ progress, onSelectWorld, onParent, onPlayMix, onPlayDaily 
             <div className="en-label" style={{ fontSize: 10 }}>gold crowns</div>
           </div>
         </div>
+
+        <button
+          onClick={onOpenPassport}
+          className="passport-card"
+          style={{ width: '100%' }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, width: '100%' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, textAlign: 'left' }}>
+              <div className="passport-seal">🛂</div>
+              <div>
+                <div style={{ fontFamily: 'var(--font-jp)', fontSize: 16, fontWeight: 800, color: 'var(--brown)' }}>はっけん パスポート</div>
+                <div className="en-label" style={{ fontSize: 11 }}>Discovery Passport</div>
+              </div>
+            </div>
+            <div style={{ textAlign: 'right' }}>
+              <div style={{ fontFamily: 'var(--font-en)', fontSize: 18, fontWeight: 900, color: 'var(--amber)' }}>{passport.lessonStamps}</div>
+              <div className="en-label" style={{ fontSize: 10 }}>stamps</div>
+            </div>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8, width: '100%', marginTop: 12 }}>
+            <div className="passport-mini-stat">
+              <span>🥇</span>
+              <strong>{passport.goldStamps}</strong>
+            </div>
+            <div className="passport-mini-stat">
+              <span>📅</span>
+              <strong>{passport.dailyStreak}</strong>
+            </div>
+            <div className="passport-mini-stat">
+              <span>✨</span>
+              <strong>{passport.badges.filter(badge => badge.unlocked).length}</strong>
+            </div>
+            <div className="passport-mini-stat">
+              <span>🦉</span>
+              <strong>{passport.perfectSessions}</strong>
+            </div>
+          </div>
+        </button>
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, width: '100%' }}>
           <button
@@ -581,6 +680,87 @@ function HomeScreen({ progress, onSelectWorld, onParent, onPlayMix, onPlayDaily 
                     </div>
                   </>
                 )}
+              </button>
+            )
+          })}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function PassportScreen({ progress, onBack, onSelectWorld }) {
+  const passport = getPassportSummary(progress)
+
+  return (
+    <div className="screen" style={{ paddingTop: 16 }}>
+      <ParchmentBg />
+      <div style={{ position: 'relative', zIndex: 1, width: '100%', display: 'flex', flexDirection: 'column', gap: 16 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <button className="back-btn" onClick={onBack}>← もどる</button>
+        </div>
+
+        <div className="passport-book">
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+            <div>
+              <div style={{ fontFamily: 'var(--font-jp)', fontSize: 22, fontWeight: 900, color: 'var(--brown)' }}>はっけん パスポート</div>
+              <div className="en-label" style={{ fontSize: 12 }}>Discovery Passport</div>
+            </div>
+            <div className="passport-seal" style={{ fontSize: 30 }}>🛂</div>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10, marginTop: 14 }}>
+            <div className="passport-stat-card"><span>📘</span><strong>{passport.lessonStamps}</strong><small>stamps</small></div>
+            <div className="passport-stat-card"><span>🥇</span><strong>{passport.goldStamps}</strong><small>gold</small></div>
+            <div className="passport-stat-card"><span>📅</span><strong>{passport.dailyStreak}</strong><small>daily</small></div>
+            <div className="passport-stat-card"><span>🦉</span><strong>{passport.perfectSessions}</strong><small>perfect</small></div>
+          </div>
+        </div>
+
+        <div style={{ background: 'white', border: '2px solid var(--sand)', borderRadius: 22, padding: '16px', boxShadow: '0 3px 0 var(--sand)' }}>
+          <div style={{ fontFamily: 'var(--font-jp)', fontSize: 16, fontWeight: 800, color: 'var(--brown)' }}>コレクション バッジ</div>
+          <div className="en-label" style={{ fontSize: 11, marginTop: 2 }}>Collection badges</div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 10, marginTop: 12 }}>
+            {passport.badges.map(badge => (
+              <div key={badge.id} className={`passport-badge${badge.unlocked ? ' unlocked' : ''}`}>
+                <div style={{ fontSize: 28 }}>{badge.emoji}</div>
+                <div style={{ textAlign: 'left', flex: 1 }}>
+                  <div style={{ fontFamily: 'var(--font-jp)', fontSize: 12, fontWeight: 800, color: 'var(--brown)' }}>{badge.jp}</div>
+                  <div className="en-label" style={{ fontSize: 10 }}>{badge.en}</div>
+                </div>
+                <div style={{ fontSize: 16 }}>{badge.unlocked ? '✨' : '🔒'}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {WORLDS.map(world => {
+            const completion = getWorldCompletion(world, progress)
+            return (
+              <button key={world.id} className="passport-world-card" onClick={() => onSelectWorld(world)}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                    <div style={{ fontSize: 28 }}>{world.emoji}</div>
+                    <div style={{ textAlign: 'left' }}>
+                      <div style={{ fontFamily: 'var(--font-jp)', fontSize: 15, fontWeight: 800, color: 'var(--brown)' }}>{world.titleJp}</div>
+                      <div className="en-label" style={{ fontSize: 11 }}>{world.titleEn}</div>
+                    </div>
+                  </div>
+                  <div style={{ fontFamily: 'var(--font-en)', fontSize: 13, fontWeight: 900, color: 'var(--amber)' }}>{completion.completed}/{completion.total}</div>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: `repeat(${world.modules.length}, 1fr)`, gap: 8, marginTop: 12 }}>
+                  {world.modules.map(mod => {
+                    const rec = getModuleRecord(progress, world.id, mod.id)
+                    return (
+                      <div key={mod.id} className={`passport-stamp${rec ? ' filled' : ''}`}>
+                        <div style={{ fontSize: 24 }}>{rec ? mod.emoji : '⬜️'}</div>
+                        <div style={{ fontFamily: 'var(--font-en)', fontSize: 10, fontWeight: 800, color: 'var(--brown-mid)' }}>{mod.id}</div>
+                        <div style={{ fontSize: 13 }}>{rec ? getCrown(rec.stars) : '・'}</div>
+                      </div>
+                    )
+                  })}
+                </div>
               </button>
             )
           })}
@@ -784,7 +964,7 @@ function QuizScreen({ sessionMeta, session, qIndex, onAnswer, onBack }) {
 
 // ─── Completion screen ────────────────────────────────────────────────────────
 
-function CompletionScreen({ sessionMeta, stars, wrongCount, rankUp, newStreak, completionDetails, onReplay, onBack }) {
+function CompletionScreen({ sessionMeta, stars, wrongCount, rankUp, newStreak, completionDetails, unlockInfo, onReplay, onBack }) {
   const crown = getCrown(stars)
   const kind = sessionMeta?.kind || 'module'
   const titleEn = sessionMeta?.titleEn || 'Lesson'
@@ -881,6 +1061,22 @@ function CompletionScreen({ sessionMeta, stars, wrongCount, rankUp, newStreak, c
           </div>
         )}
 
+        {unlockInfo && (
+          <div className="unlock-banner">
+            <div style={{ fontSize: 11, fontFamily: 'var(--font-en)', fontWeight: 800, color: 'var(--teal)', letterSpacing: '0.08em' }}>
+              NEW UNLOCK
+            </div>
+            <div style={{ fontSize: 34, marginTop: 4 }}>{unlockInfo.emoji}</div>
+            <div style={{ fontFamily: 'var(--font-jp)', fontSize: 16, fontWeight: 800, color: 'var(--brown)', marginTop: 4 }}>
+              {unlockInfo.titleJp}
+            </div>
+            <div className="en-label" style={{ fontSize: 12, marginTop: 2 }}>{unlockInfo.titleEn}</div>
+            <div style={{ fontFamily: 'var(--font-jp)', fontSize: 12, fontWeight: 700, color: 'var(--brown-mid)', marginTop: 8 }}>
+              つぎの レッスンが ひらいたよ！
+            </div>
+          </div>
+        )}
+
         {kind === 'mix' && (
           <div style={{
             width: '100%', borderRadius: 20, padding: '12px 18px', textAlign: 'center',
@@ -965,6 +1161,7 @@ export default function App() {
   const [wrongCount, setWrongCount] = useState(0)
   const [completionStars, setCompletionStars] = useState(0)
   const [completionDetails, setCompletionDetails] = useState(null)
+  const [unlockCelebration, setUnlockCelebration] = useState(null)
   const [progress, setProgress] = useState(loadProgress)
   const [showParent, setShowParent] = useState(false)
   const [rankUp, setRankUp] = useState(null)
@@ -976,6 +1173,7 @@ export default function App() {
     setQIndex(0)
     setWrongCount(0)
     setCompletionDetails(null)
+    setUnlockCelebration(null)
     setActiveWorld(world)
     setActiveModule(mod)
     setActiveSessionMeta(meta)
@@ -1052,6 +1250,7 @@ export default function App() {
 
     let sessionRankUp = null
     let dailyAwarded = false
+    let unlockInfo = null
 
     if (activeSessionMeta?.kind === 'module' && activeWorld && activeModule) {
       const wKey = `w${activeWorld.id}`
@@ -1066,6 +1265,7 @@ export default function App() {
       const prevRank = getExplorerRank(totalStarsAllWorlds(progress))
       const nextRank = getExplorerRank(totalStarsAllWorlds(next))
       sessionRankUp = prevRank.min !== nextRank.min ? nextRank : null
+      unlockInfo = getNextUnlockInfo(activeWorld, activeModule, progress)
     }
 
     if (activeSessionMeta?.kind === 'daily') {
@@ -1077,12 +1277,14 @@ export default function App() {
     saveProgress(next)
     setProgress(next)
     setRankUp(sessionRankUp)
+    setUnlockCelebration(unlockInfo)
     setStreakUpdated(withStreak.streak !== (progress.streak || 0) ? withStreak.streak : null)
     setCompletionDetails({
       dailyAwarded,
       dailyStreak: next.daily?.streak || 0,
       sessionsPlayed: next.stats?.sessionsPlayed || 0,
       perfectSessions: next.stats?.perfectSessions || 0,
+      unlockInfo,
     })
 
     setTimeout(() => setScreen('complete'), 400)
@@ -1091,6 +1293,7 @@ export default function App() {
   function handleReplay() {
     setRankUp(null)
     setStreakUpdated(null)
+    setUnlockCelebration(null)
     if (activeSessionMeta?.kind === 'daily') {
       startDaily()
       return
@@ -1115,6 +1318,7 @@ export default function App() {
   function handleCompletionBack() {
     setRankUp(null)
     setStreakUpdated(null)
+    setUnlockCelebration(null)
     setCompletionDetails(null)
     if (activeSessionMeta?.kind === 'module' && activeWorld) {
       setScreen('world')
@@ -1135,6 +1339,7 @@ export default function App() {
           onParent={() => setShowParent(true)}
           onPlayMix={startExplorerMix}
           onPlayDaily={startDaily}
+          onOpenPassport={() => setScreen('passport')}
         />
         {showParent && (
           <ParentPanel
@@ -1152,6 +1357,19 @@ export default function App() {
           />
         )}
       </>
+    )
+  }
+
+  if (screen === 'passport') {
+    return (
+      <PassportScreen
+        progress={progress}
+        onBack={() => setScreen('home')}
+        onSelectWorld={world => {
+          setActiveWorld(world)
+          setScreen('world')
+        }}
+      />
     )
   }
 
@@ -1187,6 +1405,7 @@ export default function App() {
         rankUp={rankUp}
         newStreak={streakUpdated}
         completionDetails={completionDetails}
+        unlockInfo={unlockCelebration}
         onReplay={handleReplay}
         onBack={handleCompletionBack}
       />

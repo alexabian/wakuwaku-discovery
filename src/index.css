@@ -319,8 +319,132 @@ button {
   animation: rankPop 0.55s cubic-bezier(0.34, 1.56, 0.64, 1) both;
 }
 
+.unlock-banner {
+  animation: rankPop 0.55s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+  width: 100%;
+  border-radius: 20px;
+  padding: 14px 20px;
+  text-align: center;
+  background: linear-gradient(135deg, #EAF6FF, #F3FBFF);
+  border: 2.5px solid var(--teal);
+  box-shadow: 0 4px 16px rgba(77,170,170,0.24);
+}
+
 .streak-pop {
   animation: streakPop 0.4s ease both;
+}
+
+.passport-card {
+  background: linear-gradient(135deg, #FFF8E8, #FFFDF8);
+  border: 3px solid var(--amber);
+  border-radius: 22px;
+  padding: 14px 16px;
+  box-shadow: 0 4px 0 #BF6A1F;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.passport-card:active {
+  transform: translateY(2px);
+  box-shadow: 0 2px 0 #BF6A1F;
+}
+
+.passport-seal {
+  width: 52px;
+  height: 52px;
+  border-radius: 16px;
+  background: rgba(255,255,255,0.9);
+  border: 2px dashed var(--amber);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.passport-mini-stat,
+.passport-stat-card {
+  background: rgba(255,255,255,0.85);
+  border: 1.5px solid var(--bg-alt);
+  border-radius: 14px;
+  padding: 10px 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+}
+
+.passport-mini-stat span,
+.passport-stat-card span {
+  font-size: 18px;
+}
+
+.passport-mini-stat strong,
+.passport-stat-card strong {
+  font-family: var(--font-en);
+  font-size: 15px;
+  font-weight: 900;
+  color: var(--brown);
+}
+
+.passport-stat-card small {
+  font-family: var(--font-en);
+  font-size: 10px;
+  color: var(--brown-mid);
+  opacity: 0.7;
+}
+
+.passport-book,
+.passport-world-card {
+  background: linear-gradient(135deg, #FFF8E8, #FFFDF8);
+  border: 2px solid var(--sand);
+  border-radius: 22px;
+  padding: 16px;
+  box-shadow: 0 3px 0 var(--sand);
+}
+
+.passport-badge {
+  background: #F6F0E4;
+  border: 1.5px solid var(--bg-alt);
+  border-radius: 16px;
+  padding: 12px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  opacity: 0.65;
+}
+
+.passport-badge.unlocked {
+  background: linear-gradient(135deg, #FFF8E1, #FFFDF5);
+  border-color: var(--amber);
+  opacity: 1;
+}
+
+.passport-world-card {
+  width: 100%;
+  text-align: left;
+}
+
+.passport-world-card:active {
+  transform: translateY(2px);
+  box-shadow: 0 1px 0 var(--sand);
+}
+
+.passport-stamp {
+  background: rgba(255,255,255,0.72);
+  border: 1.5px dashed var(--sand);
+  border-radius: 14px;
+  min-height: 78px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+}
+
+.passport-stamp.filled {
+  background: #FFF8E1;
+  border-style: solid;
+  border-color: var(--amber);
 }
 
 /* ── Utility ────────────────────────────────────────────────────────────── */
