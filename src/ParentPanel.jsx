@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { normaliseProgress } from './progress.js'
 
 export default function ParentPanel({ progress, onRestore, onReset, onClose }) {
@@ -7,7 +7,8 @@ export default function ParentPanel({ progress, onRestore, onReset, onClose }) {
   const [cloudStatus, setCloudStatus] = useState(null)
   const [importVal, setImportVal] = useState('')
   const [importStatus, setImportStatus] = useState(null)
-  const [copied, setCopied] = useState(false)
+  const [copyStatus, setCopyStatus] = useState('idle')
+  const exportInputRef = useRef(null)
 
   const cloudReady = cloudName.trim().length > 0 && cloudPin.length === 4
   const exportCode = btoa(JSON.stringify(progress))
@@ -82,11 +83,42 @@ export default function ParentPanel({ progress, onRestore, onReset, onClose }) {
     }
   }
 
-  function handleCopy() {
-    navigator.clipboard.writeText(exportCode).then(() => {
-      setCopied(true)
-      setTimeout(() => setCopied(false), 2000)
-    })
+  function flashCopyStatus(status, delay = 2000) {
+    setCopyStatus(status)
+    window.clearTimeout(flashCopyStatus.timeoutId)
+    flashCopyStatus.timeoutId = window.setTimeout(() => setCopyStatus('idle'), delay)
+  }
+
+  function fallbackCopy() {
+    const input = exportInputRef.current
+    if (!input) return false
+    input.focus()
+    input.select()
+    input.setSelectionRange(0, input.value.length)
+    try {
+      return document.execCommand('copy')
+    } catch (_) {
+      return false
+    }
+  }
+
+  async function handleCopy() {
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(exportCode)
+        flashCopyStatus('copied')
+        return
+      }
+    } catch (_) {
+      // Fall back to manual selection / execCommand below.
+    }
+
+    if (fallbackCopy()) {
+      flashCopyStatus('copied')
+    } else {
+      fallbackCopy()
+      flashCopyStatus('manual', 2600)
+    }
   }
 
   function handleImport() {
@@ -236,12 +268,16 @@ export default function ParentPanel({ progress, onRestore, onReset, onClose }) {
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
             <input
+              ref={exportInputRef}
               readOnly
               value={exportCode}
               onFocus={event => event.target.select()}
+              onClick={event => event.target.select()}
+              aria-label="Save code"
               style={{
                 flex: 1, padding: '10px 12px', borderRadius: 12,
-                border: '2px solid var(--sand)', background: 'var(--bg-alt)',
+                border: `2px solid ${copyStatus === 'manual' ? 'var(--amber)' : 'var(--sand)'}`,
+                background: 'var(--bg-alt)',
                 fontFamily: 'monospace', fontSize: 11, color: 'var(--brown)',
                 overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
               }}
@@ -249,13 +285,13 @@ export default function ParentPanel({ progress, onRestore, onReset, onClose }) {
             <button
               onClick={handleCopy}
               style={{
-                background: copied ? 'var(--green)' : 'var(--amber)',
+                background: copyStatus === 'copied' ? 'var(--green)' : copyStatus === 'manual' ? 'var(--teal)' : 'var(--amber)',
                 border: 'none', borderRadius: 12, padding: '10px 16px',
                 color: 'white', fontFamily: 'var(--font-en)', fontWeight: 700, fontSize: 13,
                 cursor: 'pointer', transition: 'background 0.2s', whiteSpace: 'nowrap',
               }}
             >
-              {copied ? 'Copied!' : 'Copy'}
+              {copyStatus === 'copied' ? 'Copied!' : copyStatus === 'manual' ? 'Press Ctrl+C' : 'Copy'}
             </button>
           </div>
         </div>
